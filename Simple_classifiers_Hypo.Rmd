@@ -1,0 +1,424 @@
+---
+title: "Simple_Classifiers_Hypo"
+author: "Christoph Völtzke"
+date: "2023-01-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results = "hide", message=FALSE, warning=FALSE}
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(caret)
+library(gbm)
+library(xgboost)
+library(tree)
+library(readr)
+library(devtools)
+library(pROC)
+source_url("https://github.com/pablo14/shap-values/blob/master/shap.R?raw=TRUE")
+```
+
+```{r}
+full_data <- read_csv("Data/data.csv")
+```
+
+```{r}
+# Data for Hypo
+hypo <- full_data %>%
+  select(-Night_class_hyper_30)
+
+# Exclude all BG features
+lifestyle_hypo <- hypo %>%
+  select(-hour_0_1_before_mean_glucose_ti,-hour_0_1_before_sd_glucose_ti,
+         -hours_1_2_before_mean_glucose_ti,-hours_1_2_before_sd_glucose_ti,
+         -hours_2_3_before_mean_glucose_ti,-hours_2_3_before_sd_glucose_ti,
+         -hours_3_4_before_mean_glucose_ti,-hours_3_4_before_sd_glucose_ti,
+         -hours_4_5_before_mean_glucose_ti,-hours_4_5_before_sd_glucose_ti,
+         -hours_5_6_before_mean_glucose_ti,-hours_5_6_before_sd_glucose_ti,
+         -hours_7_plus_mean_glucose_ti,-hours_7_plus_sd_glucose_ti)
+
+# Further exclude all Lifesytel variables
+base_hypo <- lifestyle_hypo %>%
+  select(-COB,-Sum_carbs,-Sum_steps,-Sum_AOB)
+```
+
+```{r}
+write.csv(hypo,"Data/Hypo/hypo.csv", row.names = FALSE)
+write.csv(lifestyle_hypo,"Data/Hypo/lifestyle_hypo.csv", row.names = FALSE)
+write.csv(base_hypo,"Data/Hypo/base_hypo.csv", row.names = FALSE)
+```
+
+```{r}
+source("Functions/helper_function_hypo.R")
+source("Functions/confusion_matrix_function.R")
+```
+
+
+## Function Hypo
+```{r, warning=FALSE}
+full_xgb <- cv_clas_hypo(hypo,10, classifier = "xgb")
+full_lr <- cv_clas_hypo(hypo,10, classifier = "lr")
+lifestyle_xgb <- cv_clas_hypo(lifestyle_hypo,10, classifier = "xgb")
+lifestyle_lr <- cv_clas_hypo(lifestyle_hypo,10, classifier = "lr",thres = 0.3)
+base_xgb <- cv_clas_hypo(base_hypo,10, classifier = "xgb")
+base_lr <- cv_clas_hypo(base_hypo,10, classifier = "lr", thres=0.3)
+```
+
+```{r, warning=FALSE}
+full_xgb
+full_lr
+
+lifestyle_xgb
+lifestyle_lr
+
+base_xgb
+base_lr
+```
+
+## Train test
+
+```{r test and train for each data set each} 
+set.seed(14)
+# test and train
+n <- nrow(hypo)
+splits <- c(rep("train", round(.8*n)), rep("test", round(.2*n)))
+full_data_split <- full_data %>% mutate(splits = sample(splits))
+
+hypo_train <- full_data_split %>% filter(splits == "train") %>% dplyr::select(-splits)%>% mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out))
+hypo_test <- full_data_split %>% filter(splits == "test") %>% dplyr::select(-splits)%>% mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out))
+```
+
+```{r test and train for each data set each} 
+n <- nrow(lifestyle_hypo)
+splits <- c(rep("train", round(.8*n)), rep("test", round(.2*n)))
+full_data_split <- lifestyle_hypo %>% mutate(splits = sample(splits))
+
+lifestyle_hypo_train <- full_data_split %>% filter(splits == "train") %>% dplyr::select(-splits) %>% mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out))
+lifestyle_hypo_test <- full_data_split %>% filter(splits == "test") %>% dplyr::select(-splits) %>% mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out))
+```
+
+```{r test and train for each data set each} 
+
+n <- nrow(base_hypo)
+splits <- c(rep("train", round(.8*n)), rep("test", round(.2*n)))
+full_data_split <- base_hypo %>% mutate(splits = sample(splits))
+
+base_hypo_train <- full_data_split %>% filter(splits == "train") %>% dplyr::select(-splits) %>% mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out))
+base_hypo_test <- full_data_split %>% filter(splits == "test") %>% dplyr::select(-splits)%>% mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out))
+```
+
+
+### Function for Metrics
+
+## Classifiers for Hypo - FULL
+```{r}
+# Random Forest, from a different package
+rf <- randomForest(Night_class_hypo_out ~ ., data = hypo_train, importance=TRUE)
+rf_importance <- importance(rf)
+
+cvcontrol <- trainControl(method = "repeatedcv", 
+                          number = 10,
+                          allowParallel = TRUE)
+
+bag_train <- train(Night_class_hypo_out ~ .,
+                   data = hypo_train, 
+                   method = 'treebag')
+
+rf_train <- train(Night_class_hypo_out ~ .,
+                  data = hypo_train, 
+                  method = 'rf',
+                  trControl = cvcontrol,
+                  importance = TRUE)
+
+gbm_train <- train(Night_class_hypo_out ~ .,
+                   data = hypo_train,
+                   method = "gbm",
+                   verbose = F,
+                   trControl = cvcontrol)
+
+train_x <- model.matrix(Night_class_hypo_out ~ .,
+                   data = hypo_train,)[,-15]
+train_y <- as.numeric(hypo_train$Night_class_hypo_out) -1
+xgboost_train <- xgboost(data = train_x,
+                         label = train_y, 
+                         max.depth = 10,
+                         eta = 1,
+                         nthread = 4,
+                         nrounds = 4,
+                         objective = "binary:logistic",
+                         verbose = 2)
+```
+
+### LR
+
+```{r}
+model <- glm(Night_class_hypo_out ~ ., family=binomial, data= hypo_train)
+pred_prob <- predict(model, type = "response", newdata = hypo_test)
+pred_lr <- ifelse(pred_prob < .5, 0,1)
+
+cmat_lr <- table(true = hypo_test$Night_class_hypo_out, predicted = pred_lr)
+roc_lr1 <- roc(hypo_test$Night_class_hypo_out, pred_prob)
+
+conf_LR_full <- confusion(cmat_lr)
+```
+
+### Feature Selection
+```{r}
+shap_results <- shap.score.rank(xgboost_train,
+                                X_train = train_x,
+                                shap_approx = F)
+var_importance(shap_results)
+
+shap_long <- shap.prep(shap = shap_results,
+                       X_train = train_x)
+
+rf_train %>%
+  varImp %>%
+  plot
+
+```
+
+## Classifiers for Hypo - LIFESTYLE
+
+```{r}
+# Random Forest, from a different package
+life_rf <- randomForest(Night_class_hypo_out ~ ., data = lifestyle_hypo_train, importance=TRUE)
+
+life_bag_train <- train(Night_class_hypo_out ~ .,
+                   data = lifestyle_hypo_train, 
+                   method = 'treebag',
+                   trControl = cvcontrol,
+                   importance = TRUE)
+
+life_rf_train <- train(Night_class_hypo_out ~ .,
+                  data = lifestyle_hypo_train, 
+                  method = 'rf',
+                  trControl = cvcontrol,
+                  importance = TRUE)
+
+life_gbm_train <- train(Night_class_hypo_out ~ .,
+                   data = lifestyle_hypo_train,
+                   method = "gbm",
+                   verbose = F,
+                   trControl = cvcontrol)
+
+train_x <- model.matrix(Night_class_hypo_out ~ .,
+                   data = lifestyle_hypo_train,)[,-15] 
+train_y <- as.numeric(lifestyle_hypo_train$Night_class_hypo_out) -1
+life_xgboost_train <- xgboost(data = train_x,
+                         label = train_y, 
+                         max.depth = 10,
+                         eta = 1,
+                         nthread = 4,
+                         nrounds = 4,
+                         objective = "binary:logistic",
+                         verbose = 2)
+```
+
+### LR
+
+```{r}
+model <- glm(Night_class_hypo_out ~ ., family=binomial, data= lifestyle_hypo_train)
+pred_prob <- predict(model, type = "response", newdata = lifestyle_hypo_test)
+pred_lr <- ifelse(pred_prob < .3, 0,1)
+
+cmat_lr <- table(true = lifestyle_hypo_test$Night_class_hypo_out, predicted = pred_lr)
+roc_lr_life <- roc(lifestyle_hypo_test$Night_class_hypo_out, pred_prob)
+
+conf_LR_life <- confusion(cmat_lr)
+```
+
+### Feature Selection
+
+```{r}
+shap_results <- shap.score.rank(life_xgboost_train,
+                                X_train = train_x,
+                                shap_approx = F)
+var_importance(shap_results)
+
+shap_long <- shap.prep(shap = shap_results,
+                       X_train = train_x)
+
+life_rf_train %>%
+  varImp %>%
+  plot
+```
+
+### Classifiers for Hyper - BASE
+```{r}
+# Random Forest, from a different package
+base_rf <- randomForest(Night_class_hypo_out ~ ., data = base_hypo_train, importance=TRUE)
+
+base_bag_train <- train(Night_class_hypo_out ~ .,
+                   data = base_hypo_train, 
+                   method = 'treebag',
+                   trControl = cvcontrol,
+                   importance = TRUE)
+
+base_rf_train <- train(Night_class_hypo_out ~ .,
+                  data = base_hypo_train, 
+                  method = 'rf',
+                  trControl = cvcontrol,
+                  importance = TRUE)
+
+base_gbm_train <- train(Night_class_hypo_out ~ .,
+                   data = base_hypo_train,
+                   method = "gbm",
+                   verbose = F,
+                   trControl = cvcontrol)
+
+train_x <- model.matrix(Night_class_hypo_out ~ .,
+                   data = base_hypo_train,)[,-15]
+train_y <- as.numeric(base_hypo_train$Night_class_hypo_out) -1
+base_xgboost_train <- xgboost(data = train_x,
+                         label = train_y, 
+                         max.depth = 10,
+                         eta = 1,
+                         nthread = 4,
+                         nrounds = 4,
+                         objective = "binary:logistic",
+                         verbose = 2)
+```
+### LR
+
+```{r}
+model <- glm(Night_class_hypo_out ~ ., family=binomial, data= base_hypo_train)
+pred_prob <- predict(model, type = "response", newdata = base_hypo_test)
+pred_lr <- ifelse(pred_prob < .3, 0,1)
+
+cmat_lr <- table(true = base_hypo_test$Night_class_hypo_out, predicted = pred_lr)
+roc_lr_test <- roc(base_hypo_test$Night_class_hypo_out, pred_prob)
+
+conf_LR_test <- confusion(cmat_lr)
+```
+
+### Feature Selection
+```{r}
+shap_results <- shap.score.rank(base_xgboost_train,
+                                X_train = train_x,
+                                shap_approx = F)
+var_importance(shap_results)
+
+base_rf_train %>%
+  varImp %>%
+  plot
+```
+
+## Evaluation of Tree based methods
+
+### Test set results - FULL
+```{r}
+bag_test <- predict(bag_train, newdata = hypo_test)
+rf_test_new <- predict(rf, newdata = hypo_test)
+rf_test  <- predict(rf_train, newdata = hypo_test)
+gbm_test <- predict(gbm_train, newdata = hypo_test)
+xgb_test <- predict(xgboost_train, newdata = model.matrix(Night_class_hypo_out ~ .,
+                   data = hypo_test,)[,-15]) %>%
+  factor(x = ifelse(. < 0.5, 1, 2), levels = c(1,2), labels = c("No_Hyper", "Hyper"))
+
+conf1 <- table(true = hypo_test$Night_class_hypo_out, predicted = bag_test)
+conf2 <- table(true = hypo_test$Night_class_hypo_out,predicted = rf_test_new)
+conf3 <- table(true = hypo_test$Night_class_hypo_out,predicted = rf_test)
+conf4 <- table(true = hypo_test$Night_class_hypo_out,predicted = gbm_test)
+conf5 <- table(true = hypo_test$Night_class_hypo_out,predicted = xgb_test)
+
+conf1_full <- confusion(conf1)
+conf2_full <- confusion(conf2)
+conf3_full <- confusion(conf3)
+conf4_full <- confusion(conf4)
+conf5_full <- confusion(conf5)
+```
+
+### Test set results - LIFESTYLE
+```{r}
+life_bag_test <- predict(life_bag_train, newdata = lifestyle_base_data_hyper30_test)
+life_rf_test_new <- predict(life_rf, newdata = lifestyle_base_data_hyper30_test)
+life_rf_test  <- predict(life_rf_train, newdata = lifestyle_base_data_hyper30_test)
+life_gbm_test <- predict(life_gbm_train, newdata = lifestyle_base_data_hyper30_test)
+life_xgb_test <- predict(life_xgboost_train, newdata = model.matrix(Night_class_hypo_out ~ .,
+                   data = lifestyle_hypo_test,)[,-15]) %>%
+  factor(x = ifelse(. < 0.5, 1, 2), levels = c(1,2), labels = c("No_Hyper", "Hyper"))
+
+conf1l <- table(true = lifestyle_hypo_test$Night_class_hypo_out, predicted = life_bag_test)
+conf2l <- table(true = lifestyle_hypo_test$Night_class_hypo_out,predicted = life_rf_test_new)
+conf3l <- table(true = lifestyle_hypo_test$Night_class_hypo_out,predicted = life_rf_test)
+conf4l <- table(true = lifestyle_hypo_test$Night_class_hypo_out,predicted = life_gbm_test)
+conf5l <- table(true = lifestyle_hypo_test$Night_class_hypo_out,predicted = life_xgb_test)
+
+conf1_life <- confusion(conf1l)
+conf2_life <- confusion(conf2l)
+conf3_life <- confusion(conf3l)
+conf4_life <- confusion(conf4l)
+conf5_life <- confusion(conf5l)
+```
+
+## Test set results
+```{r}
+base_bag_test <- predict(base_bag_train, newdata = base_hypo_test)
+base_rf_test_new <- predict(base_rf, newdata = base_hypo_test)
+base_rf_test  <- predict(base_rf_train, newdata = base_hypo_test)
+base_gbm_test <- predict(base_gbm_train, newdata = base_hypo_test)
+base_xgb_test <- predict(base_xgboost_train, newdata = model.matrix(Night_class_hypo_out ~ .,
+                   data = base_hypo_test,)[,-15]) %>%
+  factor(x = ifelse(. < 0.5, 1, 2), levels = c(1,2), labels = c("No_Hyper", "Hyper"))
+
+conf1b <- table(true = base_hypo_test$Night_class_hypo_out, predicted = base_bag_test)
+conf2b <- table(true = base_hypo_test$Night_class_hypo_out,predicted = base_rf_test_new)
+conf3b <- table(true = base_hypo_test$Night_class_hypo_out,predicted = base_rf_test)
+conf4b <- table(true = base_hypo_test$Night_class_hypo_out,predicted = base_gbm_test)
+conf5b <- table(true = base_hypo_test$Night_class_hypo_out,predicted = base_xgb_test)
+
+conf1_base <- confusion(conf1b)
+conf2_base <- confusion(conf2b)
+conf3_base <- confusion(conf3b)
+conf4_base <- confusion(conf4b)
+conf5_base <- confusion(conf5b)
+```
+
+## Compare all results
+
+```{r}
+conf1_full
+conf2_full
+conf3_full
+conf4_full
+conf5_full
+conf_LR_full
+roc_lr1$auc
+```
+
+```{r}
+conf1_life
+conf2_life
+conf3_life
+conf4_life
+conf5_life
+conf_LR_life
+roc_lr_life$auc
+```
+
+```{r}
+conf1_base
+conf2_base
+conf3_base
+conf4_base
+conf5_base
+conf_LR_test
+roc_lr_test$auc
+```
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,142 @@
+---
+title: "Synthetic data"
+author: "Christoph Völtzke"
+date: "2023-01-20"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results = "hide", message=FALSE, warning=FALSE}
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(haven)
+library(synthpop)
+```
+## Intro
+
+Here I show how the synthetic data used in the analyses is created. I can only show this as the starting point as the original data is highly sensible. Many steps, including data cleaning, integration, etc. are already processed as well as the feature extraction which is a very big part of the study process. For further information regarding these steps, feel free to contact me!
+
+## Loading all data sets
+
+This part can't be reproduced as this is existing patient data. With this I am just showing how the synthesized data is generated.
+The existing data frame is not published in this repository
+```{r, warning=FALSE}
+full_data <- read_csv("~/GitHub/Master_thesis_Avoid_Fluctuations/Data Pre Processing/Data_processed/full_data.csv")
+```
+
+```{r}
+# in order to make the synthesis easier all variables need to be brought in a specific format
+# As for synthesis a smaller number of predictors is preferred sensible or non important predictors are omitted
+
+full_data <- full_data %>%
+  mutate(Night_class_hypo_out = as.factor(Night_class_hypo_out),
+         Night_class_hyper_out = as.factor(Night_class_hyper_out),
+         Night_class_hyper_30 = as.factor(Night_class_hyper_30),
+         Geslacht = as.factor(Geslacht),
+         insulin_bin = as.factor(insulin_bin),
+         atcA10AE = as.factor(atcA10AE),
+         atcA10AB = as.factor(atcA10AB),
+         atcA10AD = as.factor(atcA10AD),
+         atcA10BB = as.factor(atcA10BB),
+         DM_type = as.factor(DM_type),
+         BMI_poli1 = as.factor(BMI_poli1),
+         atcA10AC = as.factor(atcA10AC),
+         dosA10AC = as.factor(dosA10AC)
+         ) %>%
+  select(-periods,-patient,-DM_type,-dosA10AC,-atcA10AC,-insulin_bin,-dosA10BB,-atcA10BB,-dosA10AD,-atcA10AD,-BMI_poli1)
+```
+
+```{r}
+# 2 data sets are considered with the focus on two different outcome variables. One relating to Hyperglyceamia and one to Hypoglyaecmia
+full_data <- full_data %>%
+   select(-Night_class_hyper_out)
+```
+
+```{r}
+full_data <- na.omit(full_data)
+```
+
+## Creating Synthetic Data
+```{r}
+syn_full_data <- syn(full_data) 
+```
+
+```{r}
+# data sets are extracted from list created by syn function
+syn_data <- syn_full_data$syn
+
+extend_data <- syn_data %>%
+   mutate(Night_class_hyper_30 = as.factor(Night_class_hyper_30),
+         Night_class_hypo_out = as.factor(Night_class_hypo_out)) %>%
+  select(-"...58")
+
+data <- extend_data %>%
+  select(-hour_0_1_before_median_glucose_ti,-hour_0_1_before_mad_glucose_ti,-hour_0_1_before_min_glucose_ti,-hour_0_1_before_max_glucose_ti,
+         -hours_1_2_before_median_glucose_ti,-hours_1_2_before_mad_glucose_ti,-hours_1_2_before_min_glucose_ti,-hours_1_2_before_max_glucose_ti,
+         -hours_2_3_before_median_glucose_ti,-hours_2_3_before_mad_glucose_ti,-hours_2_3_before_min_glucose_ti,-hours_2_3_before_max_glucose_ti,
+         -hours_3_4_before_median_glucose_ti,-hours_3_4_before_mad_glucose_ti,-hours_3_4_before_min_glucose_ti,-hours_3_4_before_max_glucose_ti,
+         -hours_4_5_before_median_glucose_ti,-hours_4_5_before_mad_glucose_ti,-hours_4_5_before_min_glucose_ti,-hours_4_5_before_max_glucose_ti,
+         -hours_5_6_before_median_glucose_ti,-hours_5_6_before_mad_glucose_ti,-hours_5_6_before_min_glucose_ti,-hours_5_6_before_max_glucose_ti,
+         -hours_7_plus_median_glucose_ti,-hours_7_plus_mad_glucose_ti,-hours_7_plus_min_glucose_ti,-hours_7_plus_max_glucose_ti,
+         -Night_time_median_glucose_ti,-Night_time_mad_glucose_ti,
+         -Night_time_min_glucose_ti,-Night_time_max_glucose_ti,-Night_time_mean_glucose_ti,-Night_time_sd_glucose_ti)
+```
+
+```{r}
+# this data is saved and published in the repo. This is mainly used for analyses
+write.csv(extend_data,"Data/full_data.csv", row.names = FALSE)
+write.csv(data,"Data/data.csv", row.names = FALSE)
+```
+
+## Comparing
+
+For comparison between the original and synthetic data set the distribution of both data sets is displayed. (This can only be seen in the html file as the original data set is required for this part of the code)
+
+```{r}
+#depending on the definition of hyper
+ggplot(full_data %>%
+      count(Night_class_hyper_30) %>% #Groups by team and role
+       mutate(pct=n/sum(n)),       #Calculates % for each role
+        aes(Night_class_hyper_30, n, fill=Night_class_hyper_30)) +
+        geom_col(stat="identity", position="stack") +
+  geom_text(aes(label=paste0(sprintf("%1.1f", pct*100),"%")),
+            position=position_stack(vjust=0.5))
+
+#depending on the defintiion of hyper
+ggplot(extend_data %>%
+      count(Night_class_hyper_30) %>% #Groups by team and role
+       mutate(pct=n/sum(n)),       #Calculates % for each role
+        aes(Night_class_hyper_30, n, fill=Night_class_hyper_30)) +
+        geom_col(stat="identity", position="stack") +
+  geom_text(aes(label=paste0(sprintf("%1.1f", pct*100),"%")),
+            position=position_stack(vjust=0.5))
+```
+```{r}
+ggplot(full_data %>%
+      count(Night_class_hypo_out) %>% #Groups by team and role
+       mutate(pct=n/sum(n)),       #Calculates % for each role
+        aes(Night_class_hypo_out, n, fill=Night_class_hypo_out)) +
+        geom_col(stat="identity", position="stack") +
+  geom_text(aes(label=paste0(sprintf("%1.1f", pct*100),"%")),
+            position=position_stack(vjust=0.5))
+
+ggplot(extend_data %>%
+      count(Night_class_hypo_out) %>% #Groups by team and role
+       mutate(pct=n/sum(n)),       #Calculates % for each role
+        aes(Night_class_hypo_out, n, fill=Night_class_hypo_out)) +
+        geom_col(stat="identity", position="stack") +
+  geom_text(aes(label=paste0(sprintf("%1.1f", pct*100),"%")),
+            position=position_stack(vjust=0.5))
+```
+
+
+
+
+
+
