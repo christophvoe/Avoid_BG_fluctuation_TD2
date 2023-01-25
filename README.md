@@ -11,7 +11,7 @@ For reproducing the workflow please run all the corresponding scripts. The file 
 
 | Files/Folders                 | Description   |
 | -----------------             | ------------- |
-|[Simple Classifiers Hyper](https://github.com/christophvoe/Avoid_BG_fluctuation_TD2/blob/main/Simple_classifiers_Hyper.Rmd)      |R-Markdown-script to run classifiers|
+|[Simple Classifiers Hyper](https://github.com/christophvoe/Avoid_BG_fluctuation_TD2/blob/main/Simple_classifiers_hyper.Rmd)      |R-Markdown-script to run classifiers|
 |[Simple Classifiers Hypo](https://github.com/christophvoe/Avoid_BG_fluctuation_TD2/blob/main/Simple_classifiers_Hypo.Rmd)         |R-Markdown-script to run classifiers|
 |[/Data](https://github.com/christophvoe/Avoid_BG_fluctuation_TD2/tree/main/Data)                          |Folder containing several folders with different data files. Among these Folders: Hypo data, Hyper data, synthetic data|
 |[/Functions](https://github.com/christophvoe/Avoid_BG_fluctuation_TD2/tree/main/Functions)                     |Folder containing  helper functions for classification|
